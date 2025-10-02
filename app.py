@@ -331,7 +331,7 @@ def assess_single_exon(client, original_query, transcript, all_exons, target_exo
                 if d.get('start', 0) <= exon_aa_end and d.get('end', 0) >= exon_aa_start: domain_count += 1
 
     cond5_no_domain = domain_count == 0
-    cond6_missense = counts['missense'] < 3
+    cond6_missense = counts['missense'] < 3 + counts['frameshift'] + counts['nonsense']
     cond7_splice = counts['splice'] == 0
     cond8_no_inframe_del = counts['inframe_del'] == 0
     
@@ -455,4 +455,5 @@ def assess_variant():
         return jsonify({"classification": "Error", "reason": f"An unexpected server error occurred: {str(e)}"}), 500
 
 if __name__ == '__main__':
+
     app.run(debug=True)
