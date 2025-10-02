@@ -1,0 +1,23 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h3>SKIPME: Strategic Knowledge-based In-silico Prediction of Modifiable Exons</h3>
+<p>Enter a variant to assess its associated exon for ASO-mediated skipping.</p>
+<p style="font-size: 0.9em; color: #333;">This tool specifically assesses eligibility for <strong>exon skipping</strong> to restore a reading frame. For other ASO strategies (e.g., allele-specific knockdown,WT-upregulation) or for variants with different functional effects, please consult the <a href="https://shorturl.at/YqphL" target="_blank" rel="noopener noreferrer"><b>guidelines</b></a>.</p>
+<p><b>Example Formats:</b></p>
+<ul>
+    <li><code>BRAF c.1799T>A</code></li>
+    <li><code>NM_015247.4:c.1054G>A</code></li>
+</ul>
+<form id="assessment-form">
+    <label for="query">Variant:</label>
+    <input id="query" required placeholder="e.g., NM_015247.4:c.1054G>A">
+    <button type="submit">Assess</button>
+</form>
+<div id="loader">Assessing...</div>
+<div id="results"></div>
+<script>
+document.getElementById('assessment-form').addEventListener('submit',async function(e){e.preventDefault();const t=document.getElementById('results'),n=document.getElementById('loader');t.style.display='none',n.style.display='block';const s={query:document.getElementById('query').value};try{const e=await fetch('/assess',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)}),a=await e.json();displayResults(a)}catch(e){displayResults({classification:"Error",reason:"Could not connect to the server."})}finally{n.style.display='none'}});function displayResults(e){const t=document.getElementById('results');t.style.display='block';const n=e.classification.toLowerCase().replace(/ /g,'-');if(e.classification.includes("Error")||e.classification.includes("Unable")){return void(t.innerHTML=`<div class="result-header ${n}"><h4>${e.classification}</h4></div><p>${e.reason}</p>`);}let s=`<div class="result-header ${n}"><h4>${e.classification}</h4></div>`;s+=`<p><strong>Reason:</strong> ${e.reason}</p>`,s+=`<div class="result-block"><h5>Assessment Summary</h5><p class="note">Analysis performed on transcript <strong>${e.transcript_id}</strong>, as determined by the variant's effect.</p><ul><li><strong>Gene:</strong> ${e.gene}</li><li><strong>Query:</strong> ${e.variant}</li><li><strong>Target Exon:</strong> Total #${e.total_exon_number} (Coding #${e.coding_exon_number}) | ID: ${e.exon_id}</li><li><strong>Location:</strong> ${e.location}</li></ul></div>`,s+='<div class="result-block"><h5>Guideline Checks</h5><ul class="checklist">';for(const[t,n]of Object.entries(e.checks))s+=`<li class="${n?'pass':'fail'}">${t}</li>`;s+='</ul></div>',s+=`<div class="result-block"><h5>Evidence from Databases</h5><ul><li><strong>Fraction of Protein:</strong> ${e.frac_cds}</li><li><strong>Overlapping Protein Domains:</strong> ${e.domain_count}</li><li><strong>Pathogenic Variants in Exon (on this transcript):</strong><ul><li>Missense: ${e.pathogenic_variant_counts.missense}</li><li>Nonsense: ${e.pathogenic_variant_counts.nonsense}</li><li>Frameshift: ${e.pathogenic_variant_counts.frameshift}</li><li>In-frame Deletions: ${e.pathogenic_variant_counts.inframe_del}</li><li>Splice Site: ${e.pathogenic_variant_counts.splice}</li></ul></li></ul></div>`,t.innerHTML=s}
+</script>
+{% endblock %}
+    

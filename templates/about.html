@@ -1,0 +1,28 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h3>About & Methods</h3>
+<h4>Purpose</h4>
+<p>SKIPME (Strategic Knowledge-based In-silico Prediction of Modifiable Exons) is a research tool designed to assess the eligibility of a specific non dominant-inherited exonic variant for therapeutic exon skipping using antisense oligonucleotides (ASOs). It automates the analysis of key criteria to predict whether skipping an exon is likely to restore a functional protein product, and assumes variants are exonic nonsense, missense or frameshift variants with no splice altering effects. For other variants please refer to the <a href="https://shorturl.at/YqphL" target="_blank" rel="noopener noreferrer"><b>guidelines</b></a></p>
+
+<h4>Methodology</h4>
+<p>The tool follows a systematic, rules-based workflow:</p>
+<ol>
+    <li><b>Variant Interpretation:</b> An input exonic variant in HGVS format (e.g., <code>GENE c.123A>G</code>) is submitted to the Ensembl Variant Effect Predictor (VEP) to identify the affected transcript and its genomic coordinates. The tool prioritizes MANE select or canonical transcripts.</li>
+    <li><b>Exon Mapping:</b> The variant's genomic position is mapped to a specific exon within the chosen transcript. This is done by coordinate overlap.</li>
+    <li><b>Eligibility Assessment:</b> The target exon is evaluated against a series of bioinformatic criteria derived from established guidelines for ASO-mediated exon skipping:</li>
+    <ul>
+        <li><b>Reading Frame Maintenance:</b> The coding sequence (CDS) length of the exon must be a multiple of three to ensure the downstream reading frame is preserved.</li>
+        <li><b>Premature Stop Codons:</b> An in-silico translation is performed on the hypothetical transcript lacking the target exon. If a new premature stop codon is generated, the exon is deemed ineligible.</li>
+        <li><b>Functional Importance:</b> The tool checks for overlaps with known protein domains (via Ensembl/InterPro) and flags exons that are mutational hotspots (containing multiple pathogenic missense variants from ClinVar).</li>
+        <li><b>Genomic Context:</b> The first and last coding exons are considered ineligible as they are essential for translation initiation and termination. The tool also checks for existing pathogenic splice or in-frame deletion variants within the exon, as their presence suggests that loss of the exon is itself disease-causing.</li>
+    </ul>
+</ol>
+
+<h4>Data Sources</h4>
+<p>SKIPME relies entirely on publicly available data accessed via the <b>Ensembl REST API</b> (GRCh38). This includes gene/transcript structures, sequence data, variant annotations, clinical significance from ClinVar, and protein domain information from databases like CDD and InterPro.</p>
+
+<h4>Limitations</h4>
+<p>This is a computational prediction tool intended for <b>research purposes only</b> and is <b>not a substitute for clinical advice</b>. Its predictions are dependent on the accuracy and completeness of the underlying public databases. Experimental validation is required to confirm any in-silico findings.</p>
+{% endblock %}
+    
