@@ -1,15 +1,139 @@
 #!/usr/bin/env python3
 """
 SKIPME: Strategic Knowledge-based In-silico Prediction of Modifiable Exons
-
 """
-
-from flask import Flask, request, jsonify, render_template_string
+import os
+from flask import Flask, request, jsonify, render_template
 import time
 import re
 import requests
 from typing import Dict, Any, Optional, Tuple, List
 from Bio.Seq import Seq
+
+# --- Template Setup ---
+# This section will automatically create the necessary HTML files in a 'templates' folder.
+
+def setup_templates():
+    """Creates the templates directory and HTML files if they don't exist."""
+    if not os.path.exists('templates'):
+        os.makedirs('templates')
+
+    # Base template with navigation and footer
+    base_html = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }} - SKIPME</title>
+    <style>
+        body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;margin:0;background-color:#f8f9fa;color:#333}
+        .container{max-width:800px;margin:auto;background:white;padding:2em;border-radius:8px;box-shadow:0 4px 8px rgba(0,0,0,.1); margin-top: 2em; margin-bottom: 2em;}
+        h3{color:#005a9c} a{color:#005a9c}
+        nav {background-color: #333; padding: 1em; text-align: center;}
+        nav a {color: white; margin: 0 15px; text-decoration: none; font-weight: bold;}
+        nav a:hover {text-decoration: underline;}
+        .disclaimer{font-size:.8em;color:#6c757d;margin-top:2em;text-align:center; padding-top: 1em; border-top: 1px solid #eee;}
+        /* Tool-specific styles below */
+        form{display:grid;grid-template-columns:1fr;gap:1em;align-items:center;margin-bottom:2em}
+        input,button{padding:.75em;border-radius:4px;border:1px solid #ccc;font-size:1em;width:100%;box-sizing:border-box}
+        button{background-color:#007bff;color:white;font-weight:bold;cursor:pointer;border:none;width:auto;justify-self:end;padding:.75em 1.5em}
+        button:hover{background-color:#0056b3}
+        #loader{display:none;text-align:center;padding:1em;font-size:1.2em}
+        #results{display:none}.result-header{padding:1em;color:white;border-radius:4px;margin-bottom:1em}.result-header h4{margin:0;font-size:1.5em;text-align:center}.result-block{margin-bottom:1.5em}.result-block h5{margin-bottom:.5em;color:#495057;border-bottom:1px solid #eee;padding-bottom:.3em}.checklist{list-style-type:none;padding:0}.checklist li{margin-bottom:.5em}.pass::before{content:'✔';color:#28a745;margin-right:10px;font-weight:bold}.fail::before{content:'✖';color:#dc3545;margin-right:10px;font-weight:bold}.likely-eligible{background-color:#17a2b8}.unlikely-eligible{background-color:#ffc107;color:#333}.not-eligible{background-color:#dc3545}.unable-to-assess{background-color:#6c757d}.error{background-color:#dc3545}.note{font-style:italic;color:#555;font-size:.9em}
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/">Tool</a>
+        <a href="/about">About/Methods</a>
+        <a href="/cite">How to Cite</a>
+    </nav>
+    <main class="container">
+        {% block content %}{% endblock %}
+        <p class="disclaimer">This tool is for informational purposes only and is not for clinical use. Results require manual verification.</p>
+    </main>
+</body>
+</html>
+    """
+    
+    # Index page with the tool
+    index_html = """
+{% extends "base.html" %}
+{% block content %}
+<h3>SKIPME: Strategic Knowledge-based In-silico Prediction of Modifiable Exons</h3>
+<p>Enter a variant to assess its associated exon for ASO-mediated skipping.</p>
+<p style="font-size: 0.9em; color: #333;">This tool specifically assesses eligibility for <strong>exon skipping</strong> to restore a reading frame. For other ASO strategies (e.g., allele-specific knockdown,WT-upregulation) or for variants with different functional effects, please consult the <a href="https://shorturl.at/YqphL" target="_blank" rel="noopener noreferrer"><b>guidelines</b></a>.</p>
+<p><b>Example Formats:</b></p>
+<ul>
+    <li><code>BRAF c.1799T>A</code></li>
+    <li><code>NM_015247.4:c.1054G>A</code></li>
+</ul>
+<form id="assessment-form">
+    <label for="query">Variant:</label>
+    <input id="query" required placeholder="e.g., NM_015247.4:c.1054G>A">
+    <button type="submit">Assess</button>
+</form>
+<div id="loader">Assessing...</div>
+<div id="results"></div>
+<script>
+document.getElementById('assessment-form').addEventListener('submit',async function(e){e.preventDefault();const t=document.getElementById('results'),n=document.getElementById('loader');t.style.display='none',n.style.display='block';const s={query:document.getElementById('query').value};try{const e=await fetch('/assess',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)}),a=await e.json();displayResults(a)}catch(e){displayResults({classification:"Error",reason:"Could not connect to the server."})}finally{n.style.display='none'}});function displayResults(e){const t=document.getElementById('results');t.style.display='block';const n=e.classification.toLowerCase().replace(/ /g,'-');if(e.classification.includes("Error")||e.classification.includes("Unable")){return void(t.innerHTML=`<div class="result-header ${n}"><h4>${e.classification}</h4></div><p>${e.reason}</p>`);}let s=`<div class="result-header ${n}"><h4>${e.classification}</h4></div>`;s+=`<p><strong>Reason:</strong> ${e.reason}</p>`,s+=`<div class="result-block"><h5>Assessment Summary</h5><p class="note">Analysis performed on transcript <strong>${e.transcript_id}</strong>, as determined by the variant's effect.</p><ul><li><strong>Gene:</strong> ${e.gene}</li><li><strong>Query:</strong> ${e.variant}</li><li><strong>Target Exon:</strong> Total #${e.total_exon_number} (Coding #${e.coding_exon_number}) | ID: ${e.exon_id}</li><li><strong>Location:</strong> ${e.location}</li></ul></div>`,s+='<div class="result-block"><h5>Guideline Checks</h5><ul class="checklist">';for(const[t,n]of Object.entries(e.checks))s+=`<li class="${n?'pass':'fail'}">${t}</li>`;s+='</ul></div>',s+=`<div class="result-block"><h5>Evidence from Databases</h5><ul><li><strong>Fraction of Protein:</strong> ${e.frac_cds}</li><li><strong>Overlapping Protein Domains:</strong> ${e.domain_count}</li><li><strong>Pathogenic Variants in Exon (on this transcript):</strong><ul><li>Missense: ${e.pathogenic_variant_counts.missense}</li><li>Nonsense: ${e.pathogenic_variant_counts.nonsense}</li><li>Frameshift: ${e.pathogenic_variant_counts.frameshift}</li><li>In-frame Deletions: ${e.pathogenic_variant_counts.inframe_del}</li><li>Splice Site: ${e.pathogenic_variant_counts.splice}</li></ul></li></ul></div>`,t.innerHTML=s}
+</script>
+{% endblock %}
+    """
+
+    # About page
+    about_html = """
+{% extends "base.html" %}
+{% block content %}
+<h3>About & Methods</h3>
+<h4>Purpose</h4>
+<p>SKIPME (Strategic Knowledge-based In-silico Prediction of Modifiable Exons) is a research tool designed to assess the eligibility of a specific non dominant-inherited exonic variant for therapeutic exon skipping using antisense oligonucleotides (ASOs). It automates the analysis of key criteria to predict whether skipping an exon is likely to restore a functional protein product, and assumes variants are exonic nonsense, missense or frameshift variants with no splice altering effects. For other variants please refer to the <a href="https://shorturl.at/YqphL" target="_blank" rel="noopener noreferrer"><b>guidelines</b></a></p>
+
+<h4>Methodology</h4>
+<p>The tool follows a systematic, rules-based workflow:</p>
+<ol>
+    <li><b>Variant Interpretation:</b> An input exonic variant in HGVS format (e.g., <code>GENE c.123A>G</code>) is submitted to the Ensembl Variant Effect Predictor (VEP) to identify the affected transcript and its genomic coordinates. The tool prioritizes MANE select or canonical transcripts.</li>
+    <li><b>Exon Mapping:</b> The variant's genomic position is mapped to a specific exon within the chosen transcript. This is done by coordinate overlap.</li>
+    <li><b>Eligibility Assessment:</b> The target exon is evaluated against a series of bioinformatic criteria derived from established guidelines for ASO-mediated exon skipping:</li>
+    <ul>
+        <li><b>Reading Frame Maintenance:</b> The coding sequence (CDS) length of the exon must be a multiple of three to ensure the downstream reading frame is preserved.</li>
+        <li><b>Premature Stop Codons:</b> An in-silico translation is performed on the hypothetical transcript lacking the target exon. If a new premature stop codon is generated, the exon is deemed ineligible.</li>
+        <li><b>Functional Importance:</b> The tool checks for overlaps with known protein domains (via Ensembl/InterPro) and flags exons that are mutational hotspots (containing multiple pathogenic missense variants from ClinVar).</li>
+        <li><b>Genomic Context:</b> The first and last coding exons are considered ineligible as they are essential for translation initiation and termination. The tool also checks for existing pathogenic splice or in-frame deletion variants within the exon, as their presence suggests that loss of the exon is itself disease-causing.</li>
+    </ul>
+</ol>
+
+<h4>Data Sources</h4>
+<p>SKIPME relies entirely on publicly available data accessed via the <b>Ensembl REST API</b> (GRCh38). This includes gene/transcript structures, sequence data, variant annotations, clinical significance from ClinVar, and protein domain information from databases like CDD and InterPro.</p>
+
+<h4>Limitations</h4>
+<p>This is a computational prediction tool intended for <b>research purposes only</b> and is <b>not a substitute for clinical advice</b>. Its predictions are dependent on the accuracy and completeness of the underlying public databases. Experimental validation is required to confirm any in-silico findings.</p>
+{% endblock %}
+    """
+
+    # Cite page
+    cite_html = """
+{% extends "base.html" %}
+{% block content %}
+<h3>How to Cite</h3>
+<p>SKIPME is currently being prepared for publication. If you use this tool in your research, please cite this website until a formal publication is available.</p>
+<p><strong>(Schober, 2025). SKIPME: Strategic Knowledge-based In-silico Prediction of Modifiable Exons. Retrieved from https://skipme.onrender.com/.</strong></p>
+<hr>
+<p>Once the software is formally published, we recommend citing both the paper and the specific version of the software used. The code for this tool is open-source and has been archived on Zenodo.</p>
+<p><strong>Software DOI:</strong></p>
+{% endblock %}
+    """
+
+    # Write files with explicit UTF-8 encoding
+    with open('templates/base.html', 'w', encoding='utf-8') as f: f.write(base_html)
+    with open('templates/index.html', 'w', encoding='utf-8') as f: f.write(index_html)
+    with open('templates/about.html', 'w', encoding='utf-8') as f: f.write(about_html)
+    with open('templates/cite.html', 'w', encoding='utf-8') as f: f.write(cite_html)
+
+
+# Run the setup function to ensure templates exist
+setup_templates()
 
 # ===== CONFIGURATION =====
 ENSEMBL_REST = "https://rest.ensembl.org"
@@ -59,55 +183,26 @@ class EnsemblClient:
         data = self._get(f"/sequence/id/{transcript_id}", params={"type": "cds"})
         return data.get("seq") if isinstance(data, dict) else None
         
-    # In your EnsemblClient class:
-
     def get_domains(self, protein_id):
-        # CORRECTED: Use the /overlap/id endpoint with the transcript ID
-        # and the 'protein_feature' type.
         path = f"/overlap/translation/{protein_id}"
         params = {"feature": "protein_feature"}
-        
-        # The Ensembl API returns features of different types.
-        # We only want those that represent domains from common databases.
-        domain_sources = {'Pfam', 'Smart', 'prosite_profiles', 'interpro','CDD'}
-        
         all_features = self._get(path, params=params)
         
         if not all_features or not isinstance(all_features, list):
-            return [] # Return an empty list if no features are found
+            return []
             
-            # 1. Define the primary, reliable domain databases to consider.
-        # This initial filter removes noise before de-duplication.
-        domain_sources = {
-            'CDD',
-        }
-
-        # 2. Perform an initial filter to get all high-quality domain hits.
-        preliminary_domains = [
-        f for f in all_features 
-        if f.get('type') in domain_sources
-        ]
-
-        # 3. De-duplicate the results using the InterPro accession ID.
-        # This ensures you only get one annotation per biological domain.
+        domain_sources = {'CDD'}
+        preliminary_domains = [f for f in all_features if f.get('type') in domain_sources]
+        
         unique_interpro_domains = {}
         for feature in preliminary_domains:
-            # Get the InterPro ID for the current feature.
             interpro_id = feature.get('interpro')
-        
-            # Only process features that have an InterPro ID and haven't been seen yet.
             if interpro_id and interpro_id not in unique_interpro_domains:
-                # Store this feature, keyed by its unique InterPro ID.
                 unique_interpro_domains[interpro_id] = feature
+        
+        return list(unique_interpro_domains.values())
 
-        # 4. Convert the dictionary of unique domains back into a list.
-        final_domains = list(unique_interpro_domains.values())
-    
-        return final_domains
-
-    
     def overlap_region_variation(self, chrom, start, end):
-        # FIX: Changed to a more robust API call that doesn't require pre-computed consequences.
         data = self._get(f"/overlap/region/human/{chrom}:{start}-{end}", params={'feature': 'variation'})
         return data if isinstance(data, list) else []
 
@@ -119,18 +214,15 @@ def choose_best_consequence(consequences: List[Dict[str, Any]], canonical_id: Op
 
     valid_consequences = consequences
     
-    # 1. MANE Select
     mane_select = [c for c in valid_consequences if c.get('mane_select')]
     if mane_select: return mane_select[0]
 
-    # 2. Provided Canonical ID
     if canonical_id:
         canonical_id_base = canonical_id.split('.')[0]
         for c in valid_consequences:
             if c.get('transcript_id', '').startswith(canonical_id_base):
                 return c
     
-    # 3. Protein coding with longest CDS
     coding_consequences = sorted(
         [c for c in valid_consequences if c.get('biotype') == 'protein_coding' and c.get('cds_end')],
         key=lambda c: c['cds_end'] - c['cds_start'] if c.get('cds_start') else -1,
@@ -139,7 +231,6 @@ def choose_best_consequence(consequences: List[Dict[str, Any]], canonical_id: Op
     if coding_consequences:
         return coding_consequences[0]
 
-    # 4. Fallback
     return valid_consequences[0]
 
 def extract_exons_from_transcript(transcript: Dict[str, Any]):
@@ -194,23 +285,15 @@ def assess_single_exon(client, original_query, transcript, all_exons, target_exo
     variants_in_region = client.overlap_region_variation(chrom, start, end)
     
     counts = {'missense': 0, 'inframe_del': 0, 'splice': 0, 'nonsense': 0, 'frameshift': 0}
-    # FIX: Adapted counting logic for the new, more robust API response.
     for v in variants_in_region:
         clclass = classify_variant_clinsig(v.get('clinical_significance'))
         if clclass == "pathogenic":
-            # Use the top-level consequence_type, which is more reliable.
             conseq = (v.get("consequence_type") or "").lower()
-            
-            if "missense" in conseq:
-                counts['missense'] += 1
-            elif "inframe_deletion" in conseq:
-                counts['inframe_del'] += 1
-            elif "splice_donor" in conseq or "splice_acceptor" in conseq:
-                counts['splice'] += 1
-            elif "stop_gained" in conseq: # Ensembl's term for nonsense
-                counts['nonsense'] += 1
-            elif "frameshift" in conseq:
-                counts['frameshift'] += 1
+            if "missense" in conseq: counts['missense'] += 1
+            elif "inframe_deletion" in conseq: counts['inframe_del'] += 1
+            elif "splice_donor" in conseq or "splice_acceptor" in conseq: counts['splice'] += 1
+            elif "stop_gained" in conseq: counts['nonsense'] += 1
+            elif "frameshift" in conseq: counts['frameshift'] += 1
 
     exon_cds_len = target_exon['cds_length']
     coding_exon_number = target_exon['coding_exon_number']
@@ -220,12 +303,10 @@ def assess_single_exon(client, original_query, transcript, all_exons, target_exo
     cond2_no_stop = False
     if cds_seq:
         try:
-            cds_map = {}
-            current_pos = 0
+            cds_map, current_pos = {}, 0
             sorted_coding_exons = sorted(coding_exons, key=lambda x: x['coding_exon_number'])
             for exon in sorted_coding_exons:
-                length = exon['cds_length']
-                exon_num = exon['coding_exon_number']
+                length, exon_num = exon['cds_length'], exon['coding_exon_number']
                 cds_map[exon_num] = cds_seq[current_pos : current_pos + length]
                 current_pos += length
             
@@ -267,8 +348,7 @@ def assess_single_exon(client, original_query, transcript, all_exons, target_exo
     
     return {
         "gene": gene_symbol, "variant": original_query, "transcript_id": transcript_id, "exon_id": target_exon['exon_id'],
-        "coding_exon_number": coding_exon_number,
-        "total_exon_number": target_exon['total_exon_number'],
+        "coding_exon_number": coding_exon_number, "total_exon_number": target_exon['total_exon_number'],
         "location": f"chr{target_exon['seq_region_name']}:{target_exon['start']}-{target_exon['end']}",
         "frac_cds": f"{(exon_cds_len / total_cds_len * 100):.2f}%" if total_cds_len > 0 else "N/A",
         "pathogenic_variant_counts": counts, "domain_count": domain_count,
@@ -279,37 +359,38 @@ def assess_single_exon(client, original_query, transcript, all_exons, target_exo
     }
 
 def classify_variant_clinsig(clinsig_field):
-    if clinsig_field is None:
-        return 'other'
+    if clinsig_field is None: return 'other'
     vals = [v.lower() for v in (clinsig_field if isinstance(clinsig_field, list) else [clinsig_field]) if isinstance(v, str)]
-    if any('pathogenic' in v for v in vals) and not any('likely' in v for v in vals): return 'pathogenic' # Strict pathogenic
-    if any('likely pathogenic' in v for v in vals): return 'pathogenic' # Treat likely pathogenic as pathogenic for ASO screening
+    if any('pathogenic' in v for v in vals) and not any('likely' in v for v in vals): return 'pathogenic'
+    if any('likely pathogenic' in v for v in vals): return 'pathogenic'
     if any('uncertain' in v for v in vals): return 'VUS'
     return 'other'
 
 def parse_hgvs_query(query: str) -> Tuple[Optional[str], Optional[str]]:
     query = query.strip()
     match = re.search(r'([A-Z0-9\-_.:()]+)\s*:\s*([cgnmp]\..*)', query, re.IGNORECASE)
-    if match:
-        return f"{match.group(1)}:{match.group(2)}", match.group(1).split('(')[0]
+    if match: return f"{match.group(1)}:{match.group(2)}", match.group(1).split('(')[0]
     match = re.search(r'([A-Z0-9\-_]+)\s+([cgnmp]\..*)', query, re.IGNORECASE)
-    if match:
-        return f"{match.group(1)}:{match.group(2)}", None
+    if match: return f"{match.group(1)}:{match.group(2)}", None
     return None, None
 
-# ----------------- HTML Template -----------------
-HTML_TEMPLATE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SKIPME: Strategic Knowledge-based In-silico Prediction of Modifiable Exons</title><style>body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;margin:2em;background-color:#f8f9fa;color:#333}.container{max-width:800px;margin:auto;background:white;padding:2em;border-radius:8px;box-shadow:0 4px 8px rgba(0,0,0,.1)}h3{color:#005a9c}a{color:#005a9c}form{display:grid;grid-template-columns:1fr;gap:1em;align-items:center;margin-bottom:2em}input,button{padding:.75em;border-radius:4px;border:1px solid #ccc;font-size:1em;width:100%;box-sizing:border-box}button{background-color:#007bff;color:white;font-weight:bold;cursor:pointer;border:none;width:auto;justify-self:end;padding:.75em 1.5em}button:hover{background-color:#0056b3}#loader{display:none;text-align:center;padding:1em;font-size:1.2em}#results{display:none}.result-header{padding:1em;color:white;border-radius:4px;margin-bottom:1em}.result-header h4{margin:0;font-size:1.5em;text-align:center}.result-block{margin-bottom:1.5em}.result-block h5{margin-bottom:.5em;color:#495057;border-bottom:1px solid #eee;padding-bottom:.3em}.checklist{list-style-type:none;padding:0}.checklist li{margin-bottom:.5em}.pass::before{content:'✔';color:#28a745;margin-right:10px;font-weight:bold}.fail::before{content:'✖';color:#dc3545;margin-right:10px;font-weight:bold}.likely-eligible{background-color:#17a2b8}.unlikely-eligible{background-color:#ffc107;color:#333}.not-eligible{background-color:#dc3545}.unable-to-assess{background-color:#6c757d}.error{background-color:#dc3545}.disclaimer{font-size:.8em;color:#6c757d;margin-top:2em;text-align:center}.note{font-style:italic;color:#555;font-size:.9em}</style></head><body><div class="container"><h3>SKIPME: Strategic Knowledge-based In-silico Prediction of Modifiable Exons</h3><p>Enter a variant to assess its associated exon for ASO-mediated skipping.</p><p style="font-size: 0.9em; color: #333;">This tool specifically assesses eligibility for <strong>exon skipping</strong> to restore a reading frame, typically for loss-of-function variants. For other ASO strategies (e.g., allele-specific knockdown, upregulation) or for variants with different functional effects, please consult the <a href="https://shorturl.at/YqphL" target="_blank" rel="noopener noreferrer"><b>Guidelines</b></a>.</p><p><b>Example Formats:</b></p><ul><li><code>BRAF c.1799T>A</code></li><li><code>NM_015247.4:c.1054G>A</code></li></ul><form id="assessment-form"><label for="query">Variant:</label><input id="query" required placeholder="e.g., CYLD c.1155+1G>A"><button type="submit">Assess</button></form><div id="loader">Assessing...</div><div id="results"></div><p class="disclaimer">This tool is for informational purposes only and is not for clinical use. Results require manual verification.</p></div><script>document.getElementById('assessment-form').addEventListener('submit',async function(e){e.preventDefault();const t=document.getElementById('results'),n=document.getElementById('loader');t.style.display='none',n.style.display='block';const s={query:document.getElementById('query').value};try{const e=await fetch('/assess',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)}),a=await e.json();displayResults(a)}catch(e){displayResults({classification:"Error",reason:"Could not connect to the server."})}finally{n.style.display='none'}});function displayResults(e){const t=document.getElementById('results');t.style.display='block';const n=e.classification.toLowerCase().replace(/ /g,'-');if(e.classification.includes("Error")||e.classification.includes("Unable")){return void(t.innerHTML=`<div class="result-header ${n}"><h4>${e.classification}</h4></div><p>${e.reason}</p>`);}let s=`<div class="result-header ${n}"><h4>${e.classification}</h4></div>`;s+=`<p><strong>Reason:</strong> ${e.reason}</p>`,s+=`<div class="result-block"><h5>Assessment Summary</h5><p class="note">Analysis performed on transcript <strong>${e.transcript_id}</strong>, as determined by the variant's effect.</p><ul><li><strong>Gene:</strong> ${e.gene}</li><li><strong>Query:</strong> ${e.variant}</li><li><strong>Target Exon:</strong> Total #${e.total_exon_number} (Coding #${e.coding_exon_number}) | ID: ${e.exon_id}</li><li><strong>Location:</strong> ${e.location}</li></ul></div>`,s+='<div class="result-block"><h5>Guideline Checks</h5><ul class="checklist">';for(const[t,n]of Object.entries(e.checks))s+=`<li class="${n?'pass':'fail'}">${t}</li>`;s+='</ul></div>',s+=`<div class="result-block"><h5>Evidence from Databases</h5><ul><li><strong>Fraction of Protein:</strong> ${e.frac_cds}</li><li><strong>Overlapping Protein Domains:</strong> ${e.domain_count}</li><li><strong>Pathogenic Variants in Exon (on this transcript):</strong><ul><li>Missense: ${e.pathogenic_variant_counts.missense}</li><li>Nonsense: ${e.pathogenic_variant_counts.nonsense}</li><li>Frameshift: ${e.pathogenic_variant_counts.frameshift}</li><li>In-frame Deletions: ${e.pathogenic_variant_counts.inframe_del}</li><li>Splice Site: ${e.pathogenic_variant_counts.splice}</li></ul></li></ul></div>`,t.innerHTML=s}</script></body></html>"""
-
-# ----------------- Main Flask Route -----------------
+# ----------------- Main Flask Routes -----------------
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template('index.html', title="Tool")
+
+@app.route('/about')
+def about():
+    return render_template('about.html', title="About/Methods")
+
+@app.route('/cite')
+def cite():
+    return render_template('cite.html', title="How to Cite")
 
 @app.route('/assess', methods=['POST'])
 def assess_variant():
     data = request.get_json()
     query = data.get('query')
-
     if not query:
         return jsonify({"classification": "Error", "reason": "Query string is required."}), 400
 
@@ -317,17 +398,16 @@ def assess_variant():
     try:
         hgvs_query, transcript_id_from_query = parse_hgvs_query(query)
         if not hgvs_query:
-            return jsonify({"classification": "Error", "reason": "Invalid input format. Please use a recognized HGVS format like 'GENE c.123A>G' or 'NM_12345.6:c.123A>G'."}), 400
+            return jsonify({"classification": "Error", "reason": "Invalid input format. Use 'GENE c.123A>G' or 'NM_12345.6:c.123A>G'."}), 400
 
         vep_data = client.vep_hgvs(hgvs_query)
         if not vep_data or not isinstance(vep_data, list):
-            return jsonify({"classification": "Error", "reason": f"VEP analysis failed for variant '{hgvs_query}'. The variant may be invalid or not found."}), 404
+            return jsonify({"classification": "Error", "reason": f"VEP analysis failed for '{hgvs_query}'. Variant may be invalid."}), 404
 
         transcript_consequences = vep_data[0].get('transcript_consequences', [])
         target_consequence = choose_best_consequence(transcript_consequences, transcript_id_from_query)
-
         if not target_consequence:
-            return jsonify({"classification": "Unable to Assess", "reason": f"Variant '{hgvs_query}' does not appear to affect a known transcript exon or splice site."}), 400
+            return jsonify({"classification": "Unable to Assess", "reason": f"Variant '{hgvs_query}' does not affect a known transcript."}), 400
         
         definitive_transcript_id = target_consequence['transcript_id']
         transcript_data = client.lookup_id_expand(definitive_transcript_id)
@@ -335,36 +415,23 @@ def assess_variant():
             return jsonify({"classification": "Error", "reason": f"Could not fetch data for transcript {definitive_transcript_id}."}), 500
 
         all_exons = extract_exons_from_transcript(transcript_data)
-        
-        # --- ROBUST POSITION-BASED MAPPING LOGIC ---
         target_exon = None
-        
-        variant_chrom = vep_data[0]['seq_region_name']
-        variant_start = vep_data[0]['start']
-        variant_end = vep_data[0]['end']
+        variant_chrom, variant_start, variant_end = vep_data[0]['seq_region_name'], vep_data[0]['start'], vep_data[0]['end']
 
-        # 1. Primary Method: Direct positional overlap.
         for exon in all_exons:
-            if exon['seq_region_name'] == variant_chrom and \
-               max(variant_start, exon['start']) <= min(variant_end, exon['end']):
+            if exon['seq_region_name'] == variant_chrom and max(variant_start, exon['start']) <= min(variant_end, exon['end']):
                 target_exon = exon
                 break
 
-        # 2. Secondary Method: Adjacency for splice site variants.
         if not target_exon:
             consequence_terms = set(target_consequence.get('consequence_terms', []))
-            
             if 'splice_donor_variant' in consequence_terms:
                 adjacent_exons = [ex for ex in all_exons if ex['end'] < variant_start and ex['seq_region_name'] == variant_chrom]
-                if adjacent_exons:
-                    target_exon = max(adjacent_exons, key=lambda ex: ex['end'])
-            
+                if adjacent_exons: target_exon = max(adjacent_exons, key=lambda ex: ex['end'])
             elif 'splice_acceptor_variant' in consequence_terms:
                 adjacent_exons = [ex for ex in all_exons if ex['start'] > variant_end and ex['seq_region_name'] == variant_chrom]
-                if adjacent_exons:
-                    target_exon = min(adjacent_exons, key=lambda ex: ex['start'])
+                if adjacent_exons: target_exon = min(adjacent_exons, key=lambda ex: ex['start'])
 
-        # 3. Tertiary Method: Fallback to VEP-provided ID or rank.
         if not target_exon:
             target_exon_id = target_consequence.get('exon_id')
             if target_exon_id:
@@ -374,12 +441,10 @@ def assess_variant():
             try:
                 target_exon_rank = int(target_consequence['exon'].split('/')[0])
                 target_exon = next((ex for ex in all_exons if ex['total_exon_number'] == target_exon_rank), None)
-            except (ValueError, IndexError):
-                pass
+            except (ValueError, IndexError): pass
 
         if not target_exon:
-            return jsonify({"classification": "Error", "reason": f"Could not map the variant's genomic position ({variant_chrom}:{variant_start}-{variant_end}) to a specific exon on transcript {definitive_transcript_id}."}), 500
-        # --- END MAPPING LOGIC ---
+            return jsonify({"classification": "Error", "reason": f"Could not map variant to an exon on transcript {definitive_transcript_id}."}), 500
 
         result = assess_single_exon(client, query, transcript_data, all_exons, target_exon)
         return jsonify(result)
@@ -390,6 +455,4 @@ def assess_variant():
         return jsonify({"classification": "Error", "reason": f"An unexpected server error occurred: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    # This port is for local development; Render will manage the port automatically.
     app.run(debug=True)
-
